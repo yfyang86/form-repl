@@ -2,6 +2,9 @@
 
 An interactive Read-Eval-Print Loop (REPL) for the FORM computer algebra system.
 
+
+![img](./assets/demo.png)
+
 ## Table of Contents
 
 1. [Installation](#installation)

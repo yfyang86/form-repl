@@ -96,7 +96,7 @@ fn is_repl_command(line: &str) -> Option<&str> {
 }
 
 // Print prompt for current buffer line with session number
-fn print_buffer_prompt(buffer: &InputBuffer, session: usize) {
+fn print_buffer_prompt(buffer: &InputBuffer, session: usize, highlight: bool, theme_prompt: &str, reset: &str) {
     let is_first_line = buffer.current_index == 0;
     let prompt = if is_first_line {
         format!("[{}] > ", session)
@@ -104,14 +104,19 @@ fn print_buffer_prompt(buffer: &InputBuffer, session: usize) {
         format!("... > ")
     };
     let line = &buffer.lines[buffer.current_index];
-    print!("{}{}", prompt, line);
+    if highlight {
+        print!("{}{}{}{}", theme_prompt, BOLD, prompt, reset);
+    } else {
+        print!("{}", prompt);
+    }
+    print!("{}", line);
     let _ = std::io::stdout().flush();
 }
 
 // Reprompt on current line (erases to end of line first)
-fn reprompt_buffer(buffer: &mut InputBuffer, session: usize) {
+fn reprompt_buffer(buffer: &mut InputBuffer, session: usize, highlight: bool, theme_prompt: &str, reset: &str) {
     print!("{}", ERASE_TO_END);
-    print_buffer_prompt(buffer, session);
+    print_buffer_prompt(buffer, session, highlight, theme_prompt, reset);
 }
 
 // Horizontal line separator
@@ -185,7 +190,7 @@ fn main() {
         buffer.ensure_current_line();
 
         // Print prompt with session number
-        print_buffer_prompt(&buffer, session_count);
+        print_buffer_prompt(&buffer, session_count, config.highlight, &theme.prompt, reset_str);
 
         // Read and process key events
         loop {
@@ -211,7 +216,7 @@ fn main() {
                     } else if current_line_empty {
                         // Buffer completely empty, show hint
                         println!("Use '.quit' to exit, or press Enter on a line to submit");
-                        reprompt_buffer(&mut buffer, session_count);
+                        reprompt_buffer(&mut buffer, session_count, config.highlight, &theme.prompt, reset_str);
                         continue;
                     } else {
                         // Current line has content = continue to next line
@@ -246,13 +251,13 @@ fn main() {
                     print!("{}{}", ERASE_SCREEN, reset_str);
                     let _ = std::io::stdout().flush();
                     // Reprompt on current line
-                    reprompt_buffer(&mut buffer, session_count);
+                    reprompt_buffer(&mut buffer, session_count, config.highlight, &theme.prompt, reset_str);
                 }
 
                 KeyEvent::UpArrow => {
                     if buffer.current_index > 0 {
                         buffer.current_index -= 1;
-                        reprompt_buffer(&mut buffer, session_count);
+                        reprompt_buffer(&mut buffer, session_count, config.highlight, &theme.prompt, reset_str);
                     }
                 }
 
@@ -260,7 +265,7 @@ fn main() {
                     if buffer.current_index + 1 < buffer.lines.len().max(1) {
                         buffer.current_index += 1;
                         buffer.ensure_current_line();
-                        reprompt_buffer(&mut buffer, session_count);
+                        reprompt_buffer(&mut buffer, session_count, config.highlight, &theme.prompt, reset_str);
                     }
                 }
 
