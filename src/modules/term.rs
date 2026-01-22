@@ -1,24 +1,28 @@
 // Terminal utilities - minimal now that we use rustyline
-pub static mut VERBOSE: bool = false;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+// Thread-safe verbose flag using AtomicBool instead of unsafe static mut
+// This prevents data races and follows Rust's safety guarantees
+pub static VERBOSE: AtomicBool = AtomicBool::new(false);
 
 #[inline]
 pub fn verbose_println(msg: &str) {
-    unsafe {
-        if VERBOSE {
-            eprintln!("{}", msg);
-        }
+    if VERBOSE.load(Ordering::Relaxed) {
+        eprintln!("{}", msg);
     }
 }
 
+/// Macro for conditional verbose printing
+/// Uses atomic operations for thread-safe access to VERBOSE flag
 #[macro_export]
 macro_rules! vprintln {
     () => {
-        if unsafe { $crate::modules::term::VERBOSE } {
+        if $crate::modules::term::VERBOSE.load(std::sync::atomic::Ordering::Relaxed) {
             eprintln!();
         }
     };
     ($($arg:tt)*) => {
-        if unsafe { $crate::modules::term::VERBOSE } {
+        if $crate::modules::term::VERBOSE.load(std::sync::atomic::Ordering::Relaxed) {
             eprintln!($($arg)*);
         }
     };

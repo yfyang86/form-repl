@@ -6,7 +6,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use rustyline::Editor;
-use rustyline::history::FileHistory;
 
 use modules::theme::get_theme;
 use modules::form::{self, find_form_executable};
@@ -117,11 +116,14 @@ fn main() {
     }
     if config.verbose {
         println!("  - Verbose mode enabled");
+        // Set the global verbose flag using atomic store operation
+        modules::term::VERBOSE.store(true, std::sync::atomic::Ordering::Relaxed);
     }
     println!();
 
-    // Initialize rustyline
-    let mut rl: Editor<(), FileHistory> = match Editor::new() {
+    // Initialize rustyline editor with explicit type for rustyline v14
+    // Using () for the Helper type (no custom helper) and default FileHistory
+    let mut rl: Editor<(), rustyline::history::FileHistory> = match Editor::new() {
         Ok(editor) => editor,
         Err(e) => {
             eprintln!("Failed to initialize editor: {:?}", e);
@@ -137,6 +139,9 @@ fn main() {
     }
     let _ = std::io::stdout().flush();
 
+    // Set up Ctrl+C handler to gracefully exit the REPL
+    // Note: This sets a flag to exit the main loop, but doesn't interrupt ongoing FORM execution
+    // Ctrl+C during input will cancel the current input buffer (handled by rustyline)
     let running = Arc::new(AtomicBool::new(true));
     let r_clone = running.clone();
 
@@ -227,13 +232,12 @@ fn main() {
                     is_first_line = false;
 
                     // Continue to next line
-                    let cont_prompt = if config.highlight {
+                    // Reassign instead of clear + push_str for better efficiency
+                    prompt_with_color = if config.highlight {
                         format!("{}{}... > ", theme.prompt, bold_str)
                     } else {
                         "... > ".to_string()
                     };
-                    prompt_with_color.clear();
-                    prompt_with_color.push_str(&cont_prompt);
                 }
                 Err(rustyline::error::ReadlineError::Interrupted) => {
                     // Ctrl+C - cancel current input

@@ -1,20 +1,27 @@
 // Theme definitions for syntax highlighting
 
+/// Color theme for REPL output
+/// Contains ANSI escape codes for different output types
 pub struct Theme {
     pub prompt: String,
     pub output: String,
     pub error: String,
 }
 
-impl Theme {
-    pub fn default() -> Self {
+impl Default for Theme {
+    /// Default theme with no colors (monochrome)
+    fn default() -> Self {
         Theme {
-            prompt: String::from(""),
-            output: String::from(""),
-            error: String::from(""),
+            prompt: String::new(),
+            output: String::new(),
+            error: String::new(),
         }
     }
+}
 
+impl Theme {
+
+    /// Solarized Dark theme
     pub fn solarized_dark() -> Self {
         Theme {
             prompt: String::from("\x1b[34m"),  // Blue
@@ -23,6 +30,7 @@ impl Theme {
         }
     }
 
+    /// Monokai theme
     pub fn monokai() -> Self {
         Theme {
             prompt: String::from("\x1b[38;5;208m"), // Orange
@@ -31,6 +39,7 @@ impl Theme {
         }
     }
 
+    /// Dracula theme
     pub fn dracula() -> Self {
         Theme {
             prompt: String::from("\x1b[38;5;140m"), // Purple
@@ -40,6 +49,15 @@ impl Theme {
     }
 }
 
+/// Gets a theme by name.
+///
+/// # Arguments
+///
+/// * `name` - Theme name (case-insensitive): "default", "solarized-dark", "monokai", or "dracula"
+///
+/// # Returns
+///
+/// The requested theme, or default theme if name is unrecognized.
 pub fn get_theme(name: &str) -> Theme {
     match name.to_lowercase().as_str() {
         "solarized-dark" | "solarized" | "solarized_dark" => Theme::solarized_dark(),
