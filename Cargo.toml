@@ -7,4 +7,3 @@ authors = ["Yifan Yang"]
 [dependencies]
 rustyline = "14"
 ctrlc = "3"
-nix = { version = "0.30.1", features = ["term"] }

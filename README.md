@@ -32,7 +32,7 @@ An interactive Read-Eval-Print Loop (REPL) for the FORM computer algebra system.
 If FORM is not yet built:
 
 ```sh
-cd /Users/yifanyang/Downloads/form-4.3.1-x86_64-osx/src/form
+cd /path/to/form-4.3.1-x86_64-osx/src/form
 cd ..
 autoreconf -i
 ./configure
@@ -42,12 +42,6 @@ make
 ### Building the REPL
 
 ```sh
-# Build from the src/form directory
-cd /Users/yifanyang/Downloads/form-4.3.1-x86_64-osx/src/form
-cargo build --release -p form-repl
-
-# Or from the repl directory
-cd repl
 cargo build --release
 ```
 
@@ -349,15 +343,25 @@ You can paste multi-line FORM code directly into the REPL:
 
 ## Tips and Tricks
 
-### 1. Using History
+### 1. Using Command History
 
-- **Up/Down arrows** - Navigate between buffer lines (not command history yet)
-- History is not persisted between sessions in current version
+- **Up/Down arrows** - Navigate between commands in history
+- History persists within the current session
+- Use history to recall and modify previous FORM expressions
 
 ### 2. Line Editing
 
-- **Backspace** - Delete previous character
-- **Ctrl+L** - Clear screen
+The REPL uses `rustyline` for full-featured line editing:
+
+| Key | Action |
+|-----|--------|
+| **Left/Right arrows** | Move cursor character by character |
+| **Ctrl+A** | Move to beginning of line |
+| **Ctrl+E** | Move to end of line |
+| **Backspace** | Delete previous character |
+| **Ctrl+D** | Delete character at cursor (or submit if line is empty) |
+| **Ctrl+L** | Clear screen |
+| **Ctrl+C** | Cancel current input |
 
 ### 3. Efficient Multi-line Input
 
@@ -451,7 +455,7 @@ These are FORM dependencies, not REPL dependencies.
 
 Ensure FORM is built:
 ```sh
-cd /Users/yifanyang/Downloads/form-4.3.1-x86_64-osx/src/form
+cd /path/to/form-4.3.1-x86_64-osx/src/form
 make
 ```
 
