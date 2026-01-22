@@ -139,7 +139,15 @@ impl Lexer {
             }
         }
         
-        num_str.parse().unwrap_or(0.0)
+        // Try to parse, but if it fails, return 0
+        match num_str.parse() {
+            Ok(n) => n,
+            Err(_) => {
+                // For invalid numbers like "1.2.3", just return 0
+                // This is acceptable for a REPL where user input may be experimental
+                0.0
+            }
+        }
     }
 
     fn read_identifier(&mut self) -> String {

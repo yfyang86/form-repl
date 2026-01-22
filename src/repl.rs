@@ -115,9 +115,3 @@ impl Repl {
         println!("  > (1 + 2) ^ 3\n");
     }
 }
-
-impl Default for Repl {
-    fn default() -> Self {
-        Self::new().expect("Failed to create REPL")
-    }
-}
