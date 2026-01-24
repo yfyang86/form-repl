@@ -2,6 +2,8 @@
 
 An interactive Read-Eval-Print Loop (REPL) for the FORM computer algebra system with **syntax highlighting** and **IPython-like UX**.
 
+![demo](assets/demo.png)
+
 ## What's New in v0.2.0
 
 ### ✨ Syntax Highlighting
