@@ -32,3 +32,4 @@ CLAUDE.md
 # RUST               #
 ######################
 target/
+form-repl-gui/src-tauri/target
