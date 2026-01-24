@@ -199,7 +199,7 @@ https://developer.microsoft.com/en-us/microsoft-edge/webview2/
 
 ## License
 
-MIT License
+Apache-2.0 license
 
 ## See Also
 
