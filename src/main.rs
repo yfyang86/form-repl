@@ -1,75 +1,120 @@
 mod modules;
 
 use std::env;
-use std::io::Write;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use rustyline::error::ReadlineError;
+use rustyline::history::FileHistory;
 use rustyline::Editor;
 
-use modules::theme::get_theme;
+use modules::config::Config;
 use modules::form::{self, find_form_executable};
+use modules::highlight;
+use modules::magic::{self, MagicResult, SessionState};
+use modules::term::{self, ansi};
+use modules::theme::{self, Theme};
 
-struct Config {
+/// Runtime configuration from CLI arguments
+struct CliConfig {
     highlight: bool,
     theme_name: String,
     verbose: bool,
+    show_help: bool,
+    show_version: bool,
+    show_sample_config: bool,
 }
 
-fn print_help(highlight: bool, theme: &modules::theme::Theme) {
-    let p = if highlight { &format!("{}{}", theme.prompt, "\x1b[1m") } else { "" };
-    let r = if highlight { "\x1b[0m" } else { "" };
+/// Print the help message
+fn print_help(theme: &Theme, highlight: bool) {
+    let reset = ansi::RESET;
+    let bold = ansi::BOLD;
+    let h = if highlight { theme.prompt_in.as_str() } else { "" };
+    let r = if highlight { reset } else { "" };
 
-    println!("{0}FORM REPL{1} - Multi-line input mode", p, r);
-    println!("  - Type statements, press Enter to continue on next line");
-    println!("  - Press Enter on empty line to submit");
-    println!("  - Use Up/Down arrows for command history");
-    println!("  - Use Ctrl+C to cancel current input");
-    println!("  - Type .help for commands, .quit to exit");
     println!();
-    println!("Available commands:");
-    println!("  {0}.help{1}   - Show this help", p, r);
-    println!("  {0}.quit{1}   - Exit the REPL", p, r);
+    println!("{}{}FORM REPL{} - Interactive FORM environment with IPython-like UX", h, bold, r);
+    println!();
+    println!("{}Input modes:{}", bold, reset);
+    println!("  • Type FORM code, press Enter to continue on next line");
+    println!("  • Press Enter on empty line (or type .end) to submit");
+    println!("  • Use Up/Down arrows for command history");
+    println!("  • Press Ctrl+C to cancel current input");
+    println!("  • Press Ctrl+D to exit (or submit if buffer not empty)");
+    println!();
+    println!("{}REPL commands:{}", bold, reset);
+    println!("  {}{}help{}, {}.quit{}   - Show help / Exit", h, ".", r, h, r);
+    println!("  {}.clear{}          - Clear current input buffer", h, r);
+    println!();
+    println!("{}Magic commands:{}", bold, reset);
+    println!("  {}%history [N]{}    - Show last N history entries", h, r);
+    println!("  {}%time{}           - Toggle timing display", h, r);
+    println!("  {}%who{}            - List declared symbols", h, r);
+    println!("  {}%reset{}          - Clear session state", h, r);
+    println!("  {}%lsmagic{}        - List all magic commands", h, r);
     println!();
 }
 
-fn parse_args() -> Config {
+/// Print version information
+fn print_version() {
+    println!("FORM REPL v{}", env!("CARGO_PKG_VERSION"));
+    println!("A modern interactive environment for FORM");
+}
+
+/// Parse command line arguments
+fn parse_args() -> CliConfig {
     let args: Vec<String> = env::args().collect();
-    let mut config = Config {
+    let mut config = CliConfig {
         highlight: false,
         theme_name: "default".to_string(),
         verbose: false,
+        show_help: false,
+        show_version: false,
+        show_sample_config: false,
     };
 
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--highlight" | "-h" => config.highlight = true,
+            // Fixed: -h is now for help (standard convention)
+            "--help" | "-h" => config.show_help = true,
+            "--version" | "-V" => config.show_version = true,
+            
+            // Highlighting uses -H or --highlight
+            "--highlight" | "-H" => config.highlight = true,
+            "--no-highlight" => config.highlight = false,
+            
             "--theme" | "-t" => {
                 if i + 1 < args.len() {
                     config.theme_name = args[i + 1].clone();
+                    config.highlight = true; // Auto-enable highlighting with theme
                     i += 1;
+                } else {
+                    eprintln!("Error: --theme requires a theme name");
+                    eprintln!("Available themes: {}", theme::list_themes().join(", "));
+                    std::process::exit(1);
                 }
             }
+            
             "--verbose" | "-v" => config.verbose = true,
-            "--help" | "-H" => {
-                println!("FORM REPL - Interactive FORM environment");
-                println!();
-                println!("Usage: form-repl [OPTIONS]");
-                println!();
-                println!("Options:");
-                println!("  --highlight, -h    Enable syntax highlighting");
-                println!("  --theme, -t NAME   Set color theme (default, solarized-dark, monokai, dracula)");
-                println!("  --verbose, -v      Enable verbose debug output");
-                println!("  --help, -H         Show this help message");
-                println!();
-                println!("Key bindings:");
-                println!("  Enter              - Continue to next line (or submit if empty)");
-                println!("  Up/Down            - Command history");
-                println!("  Ctrl+C             - Cancel current input");
-                println!("  Ctrl+D             - Submit (if buffer not empty) or exit (if empty)");
+            
+            "--sample-config" => config.show_sample_config = true,
+            
+            "--list-themes" => {
+                println!("Available themes:");
+                for t in theme::list_themes() {
+                    println!("  • {}", t);
+                }
                 std::process::exit(0);
             }
+            
+            arg if arg.starts_with('-') => {
+                eprintln!("Unknown option: {}", arg);
+                eprintln!("Use --help for usage information");
+                std::process::exit(1);
+            }
+            
             _ => {}
         }
         i += 1;
@@ -78,52 +123,236 @@ fn parse_args() -> Config {
     config
 }
 
+/// Check if input is a REPL command (starts with . but not .end)
 fn is_repl_command(line: &str) -> Option<&str> {
     let trimmed = line.trim();
-    if trimmed.starts_with('.') && !trimmed.contains(' ') && !trimmed.contains('\t')
-        && trimmed != ".end" {
+    if trimmed.starts_with('.')
+        && !trimmed.contains(' ')
+        && !trimmed.contains('\t')
+        && trimmed != ".end"
+    {
         Some(trimmed)
     } else {
         None
     }
 }
 
-// Horizontal line separator
-const SEPARATOR: &str = "────────────────────────────────────────";
+/// Format the input prompt (IPython style)
+fn format_in_prompt(n: usize, theme: &Theme, highlight: bool) -> String {
+    if highlight {
+        format!(
+            "{}{}In [{}]:{} ",
+            theme.prompt_in,
+            ansi::BOLD,
+            n,
+            ansi::RESET
+        )
+    } else {
+        format!("In [{}]: ", n)
+    }
+}
+
+/// Format the continuation prompt
+fn format_cont_prompt(n: usize, theme: &Theme, highlight: bool) -> String {
+    let spaces = format!("{}", n).len();
+    let padding = " ".repeat(spaces + 5); // "In [" + n + "]"
+    
+    if highlight {
+        format!(
+            "{}{}...:{} ",
+            theme.prompt_cont,
+            padding,
+            ansi::RESET
+        )
+    } else {
+        format!("{}...: ", padding)
+    }
+}
+
+/// Format the output prompt
+fn format_out_prompt(n: usize, theme: &Theme, highlight: bool) -> String {
+    if highlight {
+        format!(
+            "{}{}Out[{}]:{} ",
+            theme.prompt_out,
+            ansi::BOLD,
+            n,
+            ansi::RESET
+        )
+    } else {
+        format!("Out[{}]: ", n)
+    }
+}
+
+/// Print separator line
+fn print_separator(theme: &Theme, highlight: bool) {
+    let width = 60;
+    if highlight {
+        println!("{}", term::separator(width, true, &theme.separator));
+    } else {
+        println!("{}", "─".repeat(width));
+    }
+}
+
+/// Read multi-line input from the user
+fn read_multiline_input(
+    rl: &mut Editor<(), FileHistory>,
+    session_num: usize,
+    theme: &Theme,
+    highlight: bool,
+) -> Result<Option<String>, String> {
+    let mut full_input = String::new();
+    let mut is_first_line = true;
+
+    loop {
+        let prompt = if is_first_line {
+            format_in_prompt(session_num, theme, highlight)
+        } else {
+            format_cont_prompt(session_num, theme, highlight)
+        };
+
+        match rl.readline(&prompt) {
+            Ok(line) => {
+                let trimmed = line.trim();
+
+                // .end submits
+                if trimmed == ".end" {
+                    if !full_input.is_empty() {
+                        full_input.push('\n');
+                    }
+                    full_input.push_str(".end");
+                    return Ok(Some(full_input));
+                }
+
+                // Empty line handling
+                if line.is_empty() {
+                    if full_input.is_empty() {
+                        if is_first_line {
+                            // Completely empty - show hint
+                            println!(
+                                "{}Type FORM code, .help for help, or .quit to exit{}",
+                                if highlight { &theme.prompt_cont } else { "" },
+                                if highlight { ansi::RESET } else { "" }
+                            );
+                            continue;
+                        }
+                    }
+                    // Non-empty buffer + empty line = submit
+                    return Ok(Some(full_input));
+                }
+
+                // Check for REPL commands on first line
+                if is_first_line {
+                    if let Some(cmd) = is_repl_command(&line) {
+                        return Err(format!("CMD:{}", cmd));
+                    }
+                    
+                    // Check for magic commands
+                    if trimmed.starts_with('%') {
+                        return Err(format!("MAGIC:{}", trimmed));
+                    }
+                }
+
+                // Add line to input
+                if !full_input.is_empty() {
+                    full_input.push('\n');
+                }
+                full_input.push_str(&line);
+                is_first_line = false;
+            }
+            Err(ReadlineError::Interrupted) => {
+                // Ctrl+C - cancel current input
+                println!("^C");
+                return Ok(None);
+            }
+            Err(ReadlineError::Eof) => {
+                // Ctrl+D
+                if full_input.is_empty() {
+                    return Err("EXIT".to_string());
+                } else {
+                    return Ok(Some(full_input));
+                }
+            }
+            Err(e) => {
+                return Err(format!("Readline error: {:?}", e));
+            }
+        }
+    }
+}
 
 fn main() {
-    let config = parse_args();
-    let theme = get_theme(&config.theme_name);
+    let cli_config = parse_args();
+    
+    // Handle special flags
+    if cli_config.show_version {
+        print_version();
+        return;
+    }
+    
+    if cli_config.show_sample_config {
+        print!("{}", modules::config::sample_config());
+        return;
+    }
+    
+    // Load file config (can be overridden by CLI)
+    let file_config = Config::load();
+    
+    // Merge configs: CLI takes precedence
+    let highlight = cli_config.highlight || file_config.settings.highlight;
+    let theme_name = if cli_config.theme_name != "default" {
+        cli_config.theme_name.clone()
+    } else {
+        file_config.settings.theme.clone()
+    };
+    let verbose = cli_config.verbose || file_config.settings.verbose;
+    
+    let theme = theme::get_theme(&theme_name);
+    
+    if cli_config.show_help {
+        print_help(&theme, highlight);
+        println!("{}Usage:{} form-repl [OPTIONS]", ansi::BOLD, ansi::RESET);
+        println!();
+        println!("{}Options:{}", ansi::BOLD, ansi::RESET);
+        println!("  -h, --help          Show this help message");
+        println!("  -V, --version       Show version information");
+        println!("  -H, --highlight     Enable syntax highlighting");
+        println!("  -t, --theme NAME    Set color theme");
+        println!("  -v, --verbose       Enable verbose debug output");
+        println!("  --list-themes       List available themes");
+        println!("  --sample-config     Print sample configuration file");
+        println!();
+        return;
+    }
 
-    let form_path = match find_form_executable() {
+    // Find FORM executable
+    let form_path: PathBuf = match find_form_executable() {
         Some(p) => p,
         None => {
-            eprintln!("Error: Could not find FORM executable");
-            eprintln!("Make sure 'sources/form' exists or FORM is in your PATH");
+            let error_prefix = if highlight {
+                format!("{}{}", theme.error, ansi::BOLD)
+            } else {
+                String::new()
+            };
+            let error_suffix = if highlight { ansi::RESET } else { "" };
+            eprintln!("{}Error:{} Could not find FORM executable", error_prefix, error_suffix);
+            eprintln!("Make sure 'form' is in your PATH or set FORM_PATH environment variable");
             std::process::exit(1);
         }
     };
 
-    let p = if config.highlight { &format!("{}{}", theme.prompt, "\x1b[1m") } else { "" };
-    let r = if config.highlight { "\x1b[0m" } else { "" };
-
-    println!("{0}FORM REPL{1} - Multi-line input mode", p, r);
-    println!("  - Type statements, press Enter to continue on next line");
-    println!("  - Press Enter on empty line to submit");
-    println!("  - Use Up/Down arrows for command history");
-    if config.highlight {
-        println!("  - Theme: {}", config.theme_name);
+    // Set verbose mode
+    if verbose {
+        term::set_verbose(true);
+        term::verbose_println(&format!("Using FORM at: {}", form_path.display()));
+        term::verbose_println(&format!("Theme: {}", theme_name));
     }
-    if config.verbose {
-        println!("  - Verbose mode enabled");
-        // Set the global verbose flag using atomic store operation
-        modules::term::VERBOSE.store(true, std::sync::atomic::Ordering::Relaxed);
-    }
-    println!();
 
-    // Initialize rustyline editor with explicit type for rustyline v14
-    // Using () for the Helper type (no custom helper) and default FileHistory
-    let mut rl: Editor<(), rustyline::history::FileHistory> = match Editor::new() {
+    // Initialize session state
+    let mut state = SessionState::new();
+    state.show_timing = file_config.settings.show_timing;
+
+    // Initialize rustyline
+    let mut rl: Editor<(), FileHistory> = match Editor::new() {
         Ok(editor) => editor,
         Err(e) => {
             eprintln!("Failed to initialize editor: {:?}", e);
@@ -131,199 +360,222 @@ fn main() {
         }
     };
 
-    // Print initial separator
-    if config.highlight {
-        print!("{}{}\r\n", theme.prompt, SEPARATOR);
-    } else {
-        print!("{}\r\n", SEPARATOR);
-    }
-    let _ = std::io::stdout().flush();
+    // Load history
+    let history_path = file_config.history_path();
+    let _ = rl.load_history(&history_path);
 
-    // Set up Ctrl+C handler to gracefully exit the REPL
-    // Note: This sets a flag to exit the main loop, but doesn't interrupt ongoing FORM execution
-    // Ctrl+C during input will cancel the current input buffer (handled by rustyline)
+    // Print welcome banner
+    println!();
+    if highlight {
+        println!(
+            "{}{}FORM REPL{} v{} — Type {}%help{} for help, {}.quit{} to exit",
+            theme.prompt_in,
+            ansi::BOLD,
+            ansi::RESET,
+            env!("CARGO_PKG_VERSION"),
+            theme.prompt_out,
+            ansi::RESET,
+            theme.prompt_out,
+            ansi::RESET
+        );
+        if verbose {
+            println!("{}  Theme: {} | Verbose mode{}", theme.prompt_cont, theme_name, ansi::RESET);
+        }
+    } else {
+        println!(
+            "FORM REPL v{} — Type %help for help, .quit to exit",
+            env!("CARGO_PKG_VERSION")
+        );
+    }
+    println!();
+
+    // Set up Ctrl+C handler
     let running = Arc::new(AtomicBool::new(true));
     let r_clone = running.clone();
-
     ctrlc::set_handler(move || {
         r_clone.store(false, Ordering::SeqCst);
-    }).expect("Error setting Ctrl+C handler");
+    })
+    .expect("Error setting Ctrl+C handler");
 
-    let error_style = if config.highlight { &theme.error } else { "" };
-    let reset_str = if config.highlight { "\x1b[0m" } else { "" };
-    let bold_str = if config.highlight { "\x1b[1m" } else { "" };
-
-    let mut session_count = 1;
-
+    // Main REPL loop
     while running.load(Ordering::SeqCst) {
-        // Build prompt
-        let prompt = format!("[{}] > ", session_count);
-        let mut prompt_with_color = if config.highlight {
-            format!("{}{}{}", theme.prompt, bold_str, prompt)
-        } else {
-            prompt.clone()
+        // Read input
+        let input = match read_multiline_input(&mut rl, state.session_number, &theme, highlight) {
+            Ok(Some(input)) => input,
+            Ok(None) => {
+                // Cancelled input
+                print_separator(&theme, highlight);
+                continue;
+            }
+            Err(msg) if msg == "EXIT" => {
+                println!();
+                break;
+            }
+            Err(msg) if msg.starts_with("CMD:") => {
+                let cmd = &msg[4..];
+                match cmd {
+                    ".quit" | ".exit" | ".q" => {
+                        break;
+                    }
+                    ".help" => {
+                        print_help(&theme, highlight);
+                    }
+                    ".clear" => {
+                        println!("Input cleared.");
+                    }
+                    _ => {
+                        println!(
+                            "{}Unknown command: {}{}",
+                            if highlight { &theme.error } else { "" },
+                            cmd,
+                            if highlight { ansi::RESET } else { "" }
+                        );
+                    }
+                }
+                print_separator(&theme, highlight);
+                continue;
+            }
+            Err(msg) if msg.starts_with("MAGIC:") => {
+                let magic_cmd = &msg[6..];
+                match magic::process_magic(magic_cmd, &mut state, highlight, &theme_name) {
+                    MagicResult::Output(output) => {
+                        println!("{}", output);
+                    }
+                    MagicResult::Help => {
+                        print_help(&theme, highlight);
+                    }
+                    MagicResult::Exit => {
+                        break;
+                    }
+                    MagicResult::Error(e) => {
+                        println!(
+                            "{}{}{}",
+                            if highlight { &theme.error } else { "" },
+                            e,
+                            if highlight { ansi::RESET } else { "" }
+                        );
+                    }
+                    MagicResult::Handled | MagicResult::NotMagic => {}
+                }
+                print_separator(&theme, highlight);
+                continue;
+            }
+            Err(e) => {
+                let error_prefix = if highlight {
+                    format!("{}{}", theme.error, ansi::BOLD)
+                } else {
+                    String::new()
+                };
+                let error_suffix = if highlight { ansi::RESET } else { "" };
+                eprintln!(
+                    "{}Error: {}{}",
+                    error_prefix,
+                    e,
+                    error_suffix
+                );
+                print_separator(&theme, highlight);
+                continue;
+            }
         };
 
-        // Read input with multi-line support
-        let mut full_input = String::new();
-        let mut is_first_line = true;
-        let mut cancelled = false;
-
-        loop {
-            match rl.readline_with_initial(&prompt_with_color, ("", "")) {
-                Ok(line) => {
-                    let trimmed = line.trim();
-
-                    if trimmed == ".end" {
-                        // .end on its own line submits
-                        full_input.push_str(&line);
-                        break;
-                    }
-
-                    if line.is_empty() {
-                        // Empty line
-                        if full_input.is_empty() {
-                            // Completely empty - just continue
-                            if is_first_line {
-                                println!("Use '.quit' to exit, or type code and press Enter to continue");
-                                continue;
-                            } else {
-                                // Submit on empty continuation line
-                                break;
-                            }
-                        } else {
-                            // Non-empty buffer + empty line = submit
-                            break;
-                        }
-                    }
-
-                    // Non-empty line
-                    if is_first_line {
-                        // Check for REPL commands
-                        if let Some(cmd) = is_repl_command(&line) {
-                            match cmd {
-                                ".quit" | ".exit" => {
-                                    println!("Goodbye!");
-                                    return;
-                                }
-                                ".help" => {
-                                    print_help(config.highlight, &theme);
-                                    cancelled = true;
-                                    break;
-                                }
-                                ".clear" => {
-                                    cancelled = true;
-                                    break;
-                                }
-                                _ => {
-                                    println!("Unknown command: {}", cmd);
-                                    cancelled = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    // Add line to input
-                    if !full_input.is_empty() {
-                        full_input.push('\n');
-                    }
-                    full_input.push_str(&line);
-                    is_first_line = false;
-
-                    // Continue to next line
-                    // Reassign instead of clear + push_str for better efficiency
-                    prompt_with_color = if config.highlight {
-                        format!("{}{}... > ", theme.prompt, bold_str)
-                    } else {
-                        "... > ".to_string()
-                    };
-                }
-                Err(rustyline::error::ReadlineError::Interrupted) => {
-                    // Ctrl+C - cancel current input
-                    println!("^C");
-                    cancelled = true;
-                    break;
-                }
-                Err(rustyline::error::ReadlineError::Eof) => {
-                    // Ctrl+D
-                    if full_input.is_empty() {
-                        println!("\nUse '.quit' to exit");
-                        return;
-                    } else {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Readline error: {:?}", e);
-                    cancelled = true;
-                    break;
-                }
-            }
-        }
-
-        if cancelled {
-            // Reset for next input
-            session_count += 1;
-            if config.highlight {
-                print!("{}{}\r\n", theme.prompt, SEPARATOR);
-            } else {
-                print!("{}\r\n", SEPARATOR);
-            }
-            let _ = std::io::stdout().flush();
+        if input.trim().is_empty() {
             continue;
         }
 
-        if full_input.is_empty() {
-            continue;
-        }
-
-        // Add to history (without .end)
-        let hist_line: String = full_input.lines()
+        // Add to readline history
+        let hist_line: String = input
+            .lines()
             .filter(|l| l.trim() != ".end")
             .collect::<Vec<_>>()
             .join("\n");
         if !hist_line.is_empty() {
-            let _ = rl.add_history_entry(hist_line);
+            let _ = rl.add_history_entry(&hist_line);
         }
 
-        // Ensure .end at the end
-        if !full_input.trim_end().ends_with(".end") {
-            full_input.push_str("\n.end");
+        // Validate input
+        if let Err(e) = form::validate_input(&input) {
+            println!(
+                "{}{}Syntax warning: {}{}",
+                if highlight { &theme.error } else { "" },
+                if highlight { ansi::BOLD } else { "" },
+                e,
+                if highlight { ansi::RESET } else { "" }
+            );
         }
 
-        // Execute FORM command
-        if config.verbose {
-            eprintln!("[verbose] Running FORM: input={} bytes", full_input.len());
+        // Execute FORM
+        if verbose {
+            term::verbose_println(&format!("Executing {} bytes of FORM code", input.len()));
         }
 
-        match form::run_form(&full_input, &form_path, config.verbose) {
-            Ok(output) => {
-                let formatted = form::format_output(&output);
+        match form::run_form(&input, &form_path, verbose) {
+            Ok(result) => {
+                let formatted = form::format_output(&result.output, state.show_timing);
+                
                 if !formatted.trim().is_empty() {
-                    print!("\r\n");
-                    if config.highlight {
-                        print!("{}{}{}", theme.output, formatted, reset_str);
+                    println!();
+                    
+                    // Print output prompt for first line
+                    let out_prompt = format_out_prompt(state.session_number, &theme, highlight);
+                    
+                    // Apply syntax highlighting to output
+                    let displayed = if highlight {
+                        highlight::highlight_output(&formatted, &theme)
                     } else {
-                        print!("{}", formatted);
+                        formatted.clone()
+                    };
+                    
+                    // Print with proper formatting
+                    let lines: Vec<&str> = displayed.lines().collect();
+                    for (i, line) in lines.iter().enumerate() {
+                        if i == 0 {
+                            println!("{}{}", out_prompt, line);
+                        } else {
+                            // Indent continuation lines to align with output
+                            let indent = " ".repeat(out_prompt.chars().filter(|c| !c.is_control()).count());
+                            println!("{}{}", indent, line);
+                        }
                     }
-                    print!("\r\n");
                 }
+                
+                // Show timing if enabled
+                if state.show_timing {
+                    println!(
+                        "{}⏱ {}{}",
+                        if highlight { &theme.timing } else { "" },
+                        term::format_duration(result.duration),
+                        if highlight { ansi::RESET } else { "" }
+                    );
+                }
+                
+                // Record in session history
+                state.add_entry(input, Some(formatted), Some(result.duration));
             }
             Err(e) => {
-                eprintln!("{}{}Error: {}{}", error_style, bold_str, e, reset_str);
+                println!(
+                    "\n{}{}Error: {}{}",
+                    if highlight { &theme.error } else { "" },
+                    if highlight { ansi::BOLD } else { "" },
+                    e,
+                    if highlight { ansi::RESET } else { "" }
+                );
+                
+                // Still record the attempt
+                state.add_entry(input, None, None);
             }
         }
 
-        session_count += 1;
+        println!();
+        print_separator(&theme, highlight);
+    }
 
-        // Print separator for next session
-        if config.highlight {
-            print!("{}{}\r\n", theme.prompt, SEPARATOR);
-        } else {
-            print!("{}\r\n", SEPARATOR);
+    // Save history
+    if file_config.history.save_on_exit {
+        if let Err(e) = rl.save_history(&history_path) {
+            if verbose {
+                eprintln!("Warning: Could not save history: {}", e);
+            }
         }
-        let _ = std::io::stdout().flush();
     }
 
     println!("Goodbye!");

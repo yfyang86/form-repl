@@ -1,9 +1,24 @@
 [package]
 name = "form-repl"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 authors = ["Yifan Yang"]
+description = "An interactive REPL for FORM with syntax highlighting and IPython-like UX"
+repository = "https://github.com/form-dev/form"
+license = "MIT"
+keywords = ["form", "repl", "computer-algebra", "symbolic-computation"]
+categories = ["command-line-utilities", "science"]
 
 [dependencies]
 rustyline = "14"
 ctrlc = "3"
+dirs = "5"                    # For finding home directory
+regex = "1"                   # For syntax highlighting patterns
+chrono = "0.4"                # For timing commands
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"                  # For config file parsing
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
