@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FORM REPL</title>
+    <style>
+        :root {
+            --bg-primary: #1e1e2e;
+            --bg-secondary: #313244;
+            --bg-tertiary: #45475a;
+            --text-primary: #cdd6f4;
+            --text-secondary: #a6adc8;
+            --text-muted: #6c7086;
+            --accent-blue: #89b4fa;
+            --accent-green: #a6e3a1;
+            --accent-red: #f38ba8;
+            --accent-yellow: #f9e2af;
+            --accent-purple: #cba6f7;
+            --accent-orange: #fab387;
+            --accent-cyan: #94e2d5;
+            --border-color: #45475a;
+            --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-mono);
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Header */
+        .header {
+            background: var(--bg-secondary);
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .header h1 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--accent-purple);
+        }
+
+        .header-info {
+            display: flex;
+            gap: 20px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-green);
+        }
+
+        .status-dot.error {
+            background: var(--accent-red);
+        }
+
+        /* Main content */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Output area */
+        .output-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px 20px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .session {
+            margin-bottom: 20px;
+            border-left: 2px solid var(--border-color);
+            padding-left: 16px;
+        }
+
+        .session:last-child {
+            margin-bottom: 0;
+        }
+
+        .prompt-in {
+            color: var(--accent-blue);
+            font-weight: 600;
+        }
+
+        .prompt-out {
+            color: var(--accent-orange);
+            font-weight: 600;
+        }
+
+        .input-display {
+            margin: 4px 0;
+            white-space: pre-wrap;
+            color: var(--text-primary);
+        }
+
+        .output-display {
+            margin: 8px 0;
+            white-space: pre-wrap;
+            color: var(--accent-green);
+            background: var(--bg-secondary);
+            padding: 12px;
+            border-radius: 6px;
+        }
+
+        .error-display {
+            margin: 8px 0;
+            white-space: pre-wrap;
+            color: var(--accent-red);
+            background: rgba(243, 139, 168, 0.1);
+            padding: 12px;
+            border-radius: 6px;
+            border-left: 3px solid var(--accent-red);
+        }
+
+        .timing {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* Input area */
+        .input-area {
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border-color);
+            padding: 16px 20px;
+        }
+
+        .input-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .input-prompt {
+            color: var(--accent-blue);
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .input-hint {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .editor-container {
+            position: relative;
+        }
+
+        #code-input {
+            width: 100%;
+            min-height: 100px;
+            max-height: 300px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 12px;
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 14px;
+            line-height: 1.5;
+            resize: vertical;
+            outline: none;
+        }
+
+        #code-input:focus {
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 2px rgba(137, 180, 250, 0.2);
+        }
+
+        #code-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .button-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-family: var(--font-mono);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--accent-blue);
+            color: var(--bg-primary);
+            font-weight: 600;
+        }
+
+        .btn-primary:hover {
+            background: #7ba8ed;
+        }
+
+        .btn-primary:disabled {
+            background: var(--bg-tertiary);
+            color: var(--text-muted);
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .btn-secondary:hover {
+            background: #5a5e73;
+        }
+
+        /* Syntax highlighting classes */
+        .hl-keyword { color: var(--accent-purple); }
+        .hl-declaration { color: var(--accent-blue); }
+        .hl-function { color: var(--accent-yellow); }
+        .hl-number { color: var(--accent-orange); }
+        .hl-comment { color: var(--text-muted); font-style: italic; }
+        .hl-preprocessor { color: var(--accent-orange); font-weight: bold; }
+        .hl-string { color: var(--accent-green); }
+        .hl-operator { color: var(--accent-red); }
+
+        /* Welcome message */
+        .welcome {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+        }
+
+        .welcome h2 {
+            color: var(--accent-purple);
+            margin-bottom: 16px;
+            font-size: 20px;
+        }
+
+        .welcome p {
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        .welcome code {
+            background: var(--bg-secondary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: var(--accent-cyan);
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+
+        /* Loading indicator */
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--bg-tertiary);
+            border-top-color: var(--accent-blue);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>⚡ FORM REPL</h1>
+        <div class="header-info">
+            <div class="status-indicator">
+                <span class="status-dot" id="status-dot"></span>
+                <span id="status-text">Ready</span>
+            </div>
+            <span id="session-info">Session: 0</span>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="output-area" id="output-area">
+            <div class="welcome">
+                <h2>Welcome to FORM REPL</h2>
+                <p>Enter FORM code below and press <code>Ctrl+Enter</code> or click Run to execute.</p>
+                <p>Example: <code>Symbol x; Local E = x^2; Print; .end</code></p>
+                <p>The <code>.end</code> directive will be added automatically if omitted.</p>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <div class="input-header">
+                <span class="input-prompt" id="input-prompt">In [1]:</span>
+                <span class="input-hint">Ctrl+Enter to run • Ctrl+L to clear</span>
+            </div>
+            <div class="editor-container">
+                <textarea 
+                    id="code-input" 
+                    placeholder="Enter FORM code here..."
+                    spellcheck="false"
+                    autocomplete="off"
+                    autocorrect="off"
+                    autocapitalize="off"
+                ></textarea>
+            </div>
+            <div class="button-row">
+                <button class="btn-primary" id="run-btn" onclick="executeCode()">
+                    ▶ Run
+                </button>
+                <button class="btn-secondary" onclick="clearOutput()">
+                    Clear Output
+                </button>
+                <button class="btn-secondary" onclick="showHistory()">
+                    History
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Tauri API - will be initialized when ready
+        let invoke = null;
+
+        let sessionNumber = 1;
+        let isRunning = false;
+        let commandHistory = [];
+        let historyIndex = -1;
+
+        // DOM elements - initialized after DOM ready
+        let codeInput, outputArea, runBtn, inputPrompt, statusDot, statusText, sessionInfo;
+
+        // Syntax highlighting keywords
+        const KEYWORDS = ['if', 'else', 'elseif', 'endif', 'while', 'endwhile', 'repeat', 
+            'endrepeat', 'do', 'enddo', 'goto', 'label', 'exit', 'break', 'continue',
+            'print', 'nprint', 'id', 'identify', 'sum', 'multiply', 'bracket', 'collect',
+            'format', 'on', 'off', 'drop', 'keep', 'hide', 'unhide', 'skip', 'sort',
+            'contract', 'trace4', 'tracen', 'delete', 'discard', 'also', 'once', 'only',
+            'all', 'first', 'last', 'multi'];
+
+        const DECLARATIONS = ['symbol', 'symbols', 'local', 'global', 'index', 'indices',
+            'vector', 'vectors', 'tensor', 'tensors', 'function', 'functions', 
+            'cfunction', 'cfunctions', 'set', 'auto', 'autodeclare', 'dimension'];
+
+        // Initialize when DOM is ready
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Get DOM elements
+            codeInput = document.getElementById('code-input');
+            outputArea = document.getElementById('output-area');
+            runBtn = document.getElementById('run-btn');
+            inputPrompt = document.getElementById('input-prompt');
+            statusDot = document.getElementById('status-dot');
+            statusText = document.getElementById('status-text');
+            sessionInfo = document.getElementById('session-info');
+
+            // Wait for Tauri to be ready - Tauri v2 uses window.__TAURI__
+            await initializeTauri();
+
+            // Focus input
+            codeInput.focus();
+            
+            // Setup keyboard events
+            setupKeyboardEvents();
+        });
+
+        async function initializeTauri() {
+            // Try multiple times to get Tauri API
+            for (let i = 0; i < 10; i++) {
+                if (window.__TAURI__) {
+                    // Tauri v2 API structure
+                    if (window.__TAURI__.core && window.__TAURI__.core.invoke) {
+                        invoke = window.__TAURI__.core.invoke;
+                    } else if (window.__TAURI__.tauri && window.__TAURI__.tauri.invoke) {
+                        invoke = window.__TAURI__.tauri.invoke;
+                    } else if (window.__TAURI__.invoke) {
+                        invoke = window.__TAURI__.invoke;
+                    }
+                    
+                    if (invoke) {
+                        console.log('Tauri API initialized');
+                        await initializeApp();
+                        return;
+                    }
+                }
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+            
+            console.error('Tauri API not available after retries');
+            setStatus('Tauri not ready', true);
+            appendError('Tauri API not available. Make sure you are running this in Tauri.');
+        }
+
+        async function initializeApp() {
+            try {
+                const info = await invoke('get_app_info');
+                console.log('App info:', info);
+                if (!info.form_path) {
+                    setStatus('FORM not found', true);
+                    appendError('FORM executable not found. Please set FORM_PATH environment variable.');
+                } else {
+                    setStatus('Ready');
+                    console.log('FORM path:', info.form_path);
+                }
+            } catch (e) {
+                console.error('Failed to get app info:', e);
+                setStatus('Init error', true);
+                appendError('Failed to initialize: ' + e);
+            }
+        }
+
+        function setupKeyboardEvents() {
+            codeInput.addEventListener('keydown', handleKeyDown);
+        }
+
+        function handleKeyDown(e) {
+            // Ctrl+Enter to run
+            if (e.ctrlKey && e.key === 'Enter') {
+                e.preventDefault();
+                executeCode();
+            }
+            // Ctrl+L to clear
+            if (e.ctrlKey && e.key === 'l') {
+                e.preventDefault();
+                clearOutput();
+            }
+            // Up arrow for history
+            if (e.key === 'ArrowUp' && e.ctrlKey) {
+                e.preventDefault();
+                navigateHistory(-1);
+            }
+            // Down arrow for history
+            if (e.key === 'ArrowDown' && e.ctrlKey) {
+                e.preventDefault();
+                navigateHistory(1);
+            }
+            // Tab for indentation
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                const start = codeInput.selectionStart;
+                const end = codeInput.selectionEnd;
+                codeInput.value = codeInput.value.substring(0, start) + '    ' + codeInput.value.substring(end);
+                codeInput.selectionStart = codeInput.selectionEnd = start + 4;
+            }
+        }
+
+        function setStatus(text, isError = false) {
+            statusText.textContent = text;
+            statusDot.classList.toggle('error', isError);
+        }
+
+        function updateSessionInfo(count) {
+            sessionInfo.textContent = `Session: ${count}`;
+            inputPrompt.textContent = `In [${count + 1}]:`;
+        }
+
+        async function executeCode() {
+            if (!invoke) {
+                appendError('Tauri API not available. Cannot execute code.');
+                return;
+            }
+
+            const code = codeInput.value.trim();
+            if (!code || isRunning) return;
+
+            isRunning = true;
+            runBtn.disabled = true;
+            runBtn.innerHTML = '<span class="loading"></span> Running...';
+            setStatus('Running...');
+
+            // Add to history
+            commandHistory.push(code);
+            historyIndex = commandHistory.length;
+
+            // Remove welcome message if present
+            const welcome = outputArea.querySelector('.welcome');
+            if (welcome) welcome.remove();
+
+            try {
+                const result = await invoke('execute_form', { input: code });
+                
+                // Create session element
+                const session = document.createElement('div');
+                session.className = 'session';
+                
+                // Input display
+                const inputHtml = `
+                    <div class="prompt-in">In [${result.session_number}]:</div>
+                    <div class="input-display">${highlightCode(escapeHtml(code))}</div>
+                `;
+                
+                let outputHtml = '';
+                if (result.success && result.output) {
+                    outputHtml = `
+                        <div class="prompt-out">Out[${result.session_number}]:</div>
+                        <div class="output-display">${highlightOutput(escapeHtml(result.output))}</div>
+                        <div class="timing">⏱ ${result.duration_ms}ms</div>
+                    `;
+                } else if (!result.success) {
+                    const errorText = result.error || 'Unknown error';
+                    outputHtml = `
+                        <div class="error-display">Error: ${escapeHtml(errorText)}</div>
+                    `;
+                } else if (result.success && !result.output) {
+                    outputHtml = `
+                        <div class="output-display" style="color: var(--text-muted);">(No output)</div>
+                        <div class="timing">⏱ ${result.duration_ms}ms</div>
+                    `;
+                }
+                
+                session.innerHTML = inputHtml + outputHtml;
+                outputArea.appendChild(session);
+                
+                // Scroll to bottom
+                outputArea.scrollTop = outputArea.scrollHeight;
+                
+                // Update session info
+                updateSessionInfo(result.session_number);
+                
+                setStatus(result.success ? 'Ready' : 'Error', !result.success);
+                
+                // Clear input on success
+                if (result.success) {
+                    codeInput.value = '';
+                }
+                
+            } catch (e) {
+                console.error('Execute error:', e);
+                appendError(`Error: ${e}`);
+                setStatus('Error', true);
+            }
+
+            isRunning = false;
+            runBtn.disabled = false;
+            runBtn.innerHTML = '▶ Run';
+            codeInput.focus();
+        }
+
+        function clearOutput() {
+            outputArea.innerHTML = `
+                <div class="welcome">
+                    <h2>Output Cleared</h2>
+                    <p>Enter FORM code below to continue.</p>
+                </div>
+            `;
+        }
+
+        async function showHistory() {
+            if (!invoke) {
+                alert('Tauri API not available');
+                return;
+            }
+            
+            try {
+                const history = await invoke('get_history', { count: 10 });
+                
+                if (history.length === 0) {
+                    alert('No history available');
+                    return;
+                }
+
+                let historyText = 'Recent History:\n\n';
+                history.reverse().forEach((entry) => {
+                    historyText += `[${entry.number}] ${entry.input.split('\n')[0]}`;
+                    if (entry.input.includes('\n')) historyText += '...';
+                    historyText += '\n';
+                });
+                
+                alert(historyText);
+            } catch (e) {
+                console.error('History error:', e);
+                alert('Failed to get history: ' + e);
+            }
+        }
+
+        function navigateHistory(direction) {
+            if (commandHistory.length === 0) return;
+            
+            historyIndex += direction;
+            
+            if (historyIndex < 0) historyIndex = 0;
+            if (historyIndex >= commandHistory.length) {
+                historyIndex = commandHistory.length;
+                codeInput.value = '';
+                return;
+            }
+            
+            codeInput.value = commandHistory[historyIndex];
+        }
+
+        function appendError(message) {
+            const welcome = outputArea.querySelector('.welcome');
+            if (welcome) welcome.remove();
+            
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error-display';
+            errorDiv.textContent = message;
+            outputArea.appendChild(errorDiv);
+            outputArea.scrollTop = outputArea.scrollHeight;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function highlightCode(code) {
+            // Simple syntax highlighting
+            let result = code;
+            
+            // Highlight preprocessor directives (.end, .sort, etc.)
+            result = result.replace(/(\.(end|sort|store|global|clear))\b/gi, 
+                '<span class="hl-preprocessor">$1</span>');
+            
+            // Highlight declarations (must come before keywords)
+            const declPattern = new RegExp('\\b(' + DECLARATIONS.join('|') + ')\\b', 'gi');
+            result = result.replace(declPattern, '<span class="hl-declaration">$1</span>');
+            
+            // Highlight keywords
+            const kwPattern = new RegExp('\\b(' + KEYWORDS.join('|') + ')\\b', 'gi');
+            result = result.replace(kwPattern, '<span class="hl-keyword">$1</span>');
+            
+            // Skip number highlighting to avoid breaking HTML class names
+            
+            return result;
+        }
+
+        function highlightOutput(output) {
+            // For output, we apply minimal highlighting to avoid breaking content
+            // Just return the plain output - it's already in a styled container
+            return output;
+        }
+    </script>
+</body>
+</html>
